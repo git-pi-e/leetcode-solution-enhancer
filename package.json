@@ -1,0 +1,36 @@
+{
+  "name": "leetcode-solution-enhancer",
+  "description": "Shows a carousel of YouTube video solutions in the Solutions tab of LeetCode problems.",
+  "version": "1.0.1",
+  "author": "git-pi-e",
+  "license": "GPL-3.0-only",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.4.2",
+  "scripts": {
+    "build:chrome": "wxt build",
+    "build:firefox": "wxt build -b firefox && web-ext lint -s .output/firefox-mv3",
+    "zip:chrome": "wxt zip",
+    "zip:firefox": "wxt zip -b firefox",
+    "lint": "biome check . && svelte-check-native --workspace . --svelte-warnings bridge",
+    "format": "biome check --write .",
+    "test": "vitest run",
+    "postinstall": "wxt prepare && (git rev-parse --git-dir >/dev/null 2>&1 && git config core.hooksPath .githooks || true)"
+  },
+  "dependencies": {
+    "@webext-core/messaging": "^4.0.2",
+    "svelte": "^5.59.2"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.6.9",
+    "@wxt-dev/auto-icons": "^2.0.0",
+    "@wxt-dev/module-svelte": "^2.0.5",
+    "happy-dom": "^21.0.4",
+    "playwright": "1.65.1",
+    "svelte-check-native": "1.12.2",
+    "typescript": "7.0.2",
+    "vitest": "^5.1.2",
+    "web-ext": "10.8.0",
+    "wxt": "^0.21.5"
+  }
+}
