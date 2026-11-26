@@ -1,0 +1,105 @@
+name: Release
+
+# Run by hand from the Actions tab on main. Bump "version" in package.json before running it.
+# It publishes the packages CI already built and tested for that commit, so nothing is rebuilt here.
+on:
+  workflow_dispatch:
+    inputs:
+      stores:
+        description: Stores to submit to, besides the GitHub release
+        type: choice
+        options: [both, firefox, chrome, none]
+        default: both
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: stores
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Read the version and refuse to release it twice
+        id: version
+        run: |
+          version="$(jq -r .version package.json)"
+          if gh release view "v${version}" >/dev/null 2>&1; then
+            echo "v${version} is already released. Bump version in package.json, push, wait for CI, then run this again." >&2
+            exit 1
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Find the CI run that built this commit
+        id: ci
+        run: |
+          run_id="$(gh run list --workflow ci.yml --commit "$GITHUB_SHA" --event push --status success --limit 1 \
+            --json databaseId --jq '.[0].databaseId // empty')"
+          if [ -z "$run_id" ]; then
+            echo "No successful CI run for ${GITHUB_SHA}. Wait for CI on main to pass, then run this again." >&2
+            exit 1
+          fi
+          echo "run_id=${run_id}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: extension-packages
+          path: .output
+          run-id: ${{ steps.ci.outputs.run_id }}
+          github-token: ${{ github.token }}
+
+      - if: inputs.stores != 'none'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      - if: inputs.stores != 'none'
+        uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - if: inputs.stores != 'none'
+        name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # Stores go first: if a submission fails, nothing is tagged yet and the run can simply be repeated.
+      - if: inputs.stores != 'none'
+        name: Submit to the stores
+        run: |
+          args=()
+          if [ "$STORES" = both ] || [ "$STORES" = chrome ]; then
+            args+=(--chrome-zip .output/*-chrome.zip)
+          fi
+          if [ "$STORES" = both ] || [ "$STORES" = firefox ]; then
+            args+=(--firefox-zip .output/*-firefox.zip --firefox-sources-zip .output/*-sources.zip)
+          fi
+          bunx wxt submit "${args[@]}"
+        env:
+          STORES: ${{ inputs.stores }}
+          # API v1.1 and its OAuth refresh tokens stopped working on October 15th, 2026.
+          CHROME_API_VERSION: v2
+          CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
+          CHROME_PUBLISHER_ID: ${{ secrets.CHROME_PUBLISHER_ID }}
+          CHROME_SERVICE_ACCOUNT_CLIENT_EMAIL: ${{ secrets.CHROME_SERVICE_ACCOUNT_CLIENT_EMAIL }}
+          CHROME_SERVICE_ACCOUNT_PRIVATE_KEY: ${{ secrets.CHROME_SERVICE_ACCOUNT_PRIVATE_KEY }}
+          FIREFOX_EXTENSION_ID: ${{ secrets.FIREFOX_EXTENSION_ID }}
+          FIREFOX_JWT_ISSUER: ${{ secrets.FIREFOX_JWT_ISSUER }}
+          FIREFOX_JWT_SECRET: ${{ secrets.FIREFOX_JWT_SECRET }}
+
+      - name: Create the GitHub release
+        run: |
+          tag="v${{ steps.version.outputs.version }}"
+          gh release create "$tag" .output/*.zip --target "$GITHUB_SHA" --title "$tag" --generate-notes

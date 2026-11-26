@@ -1,0 +1,3 @@
+#!/bin/sh
+# Biome lint and format check, then type-check. Bypass once with `git commit --no-verify`.
+bun run lint
